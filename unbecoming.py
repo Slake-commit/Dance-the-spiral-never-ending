@@ -1,3 +1,4 @@
+import copy
 import os
 import random
 import streamlit as st
@@ -7,10 +8,10 @@ from google import genai
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key) if api_key else None
-MODEL_NAME = "gemini-3.5-flash-lite" 
+MODEL_NAME = "gemini-3.5-flash-lite"
 
-# ---------------------------------------------------------------- setup
-st.set_page_config(page_title="Unbecoming", page_icon="🌌")
+#setup
+st.set_page_config(page_title="Ever Becoming", page_icon="🌌")
 
 VOID_VOICE = """
 Role: The voice of the Void
@@ -46,14 +47,28 @@ defaults = {
     "result_text": "",
     "result_amount": 0,
     "cleared": [],
+    "sphinx_cleared": False,
+    "mountain_done": False,
+    "hard_riddle_open": False,
     "chapel_found": 0,
     "clues": [],
+    "watched": False,
+    "chamber_step": 0,
+    "stage": "shifting",  # shifting -> chamber -> whispering
 }
 for key, value in defaults.items():
-    st.session_state.setdefault(key, value)
+    # deepcopy so the lists in `defaults` are never mutated by the game
+    st.session_state.setdefault(key, copy.deepcopy(value))
 
 
-# ---------------------------------------------------------------- AI helpers
+def reset_game():
+    for k, v in defaults.items():
+        st.session_state[k] = copy.deepcopy(v)
+    for k in ("scene_intros", "riddle", "riddle_options"):
+        st.session_state.pop(k, None)
+
+
+# AI
 def call_void(prompt, fallback):
     """Ask the model; return (text, ok). Falls back gracefully."""
     if client is None:
@@ -94,15 +109,16 @@ Outcome: {outcome}
     return text
 
 
-#Game stuff
+# game 
 def lose_essence(amount):
-    st.session_state.essence = max(0, st.session_state.essence - 10)
+    st.session_state.essence = max(0, st.session_state.essence - amount)
 
 
 def gain_essence(amount):
     old = st.session_state.essence
     st.session_state.essence = min(
-        st.session_state.max_essence, old + 5
+        st.session_state.max_essence,
+        st.session_state.essence + amount,
     )
     return st.session_state.essence - old
 
@@ -114,8 +130,19 @@ def set_result(kind, text, amount=0):
     st.session_state.result_amount = amount
 
 
+def shifting_room_complete():
+    return (
+        st.session_state.sphinx_cleared
+        and "chapel" in st.session_state.cleared
+        and st.session_state.mountain_done
+    )
+
+
 def _continue():
     st.session_state.action_complete = False
+    # Move on to the Chamber only after the player has read the last result
+    if st.session_state.stage == "shifting" and shifting_room_complete():
+        st.session_state.stage = "chamber"
 
 
 def show_continue_button():
@@ -132,7 +159,10 @@ def show_result():
     elif kind == "lose":
         st.error(f"💔 OH NO: You have lost {amount} Essence.")
     elif kind == "heal":
-        st.success(f"✨ You regain {amount} Essence.")
+        if amount:
+            st.success(f"✨ You regain {amount} Essence.")
+        else:
+            st.success("✨ Your essence is already full.")
     elif kind == "success":
         st.success("✅ Success! You can pass through to the next part of the story.")
     else:
@@ -154,7 +184,7 @@ def scene_intro(scene, description, prompt):
         seen_scenes.append(scene)
 
 
-#Acts/scenes
+# Act 1: Awakening
 def awakening():
     st.session_state.name = st.text_input("What is your name?") or "Initiate"
 
@@ -182,17 +212,12 @@ def awakening():
         )
 
         if st.button("Follow the patterns"):
-         st.session_state.game_started = True
-         st.rerun()
+            st.session_state.game_started = True
+            st.rerun()
 
 
-def sphinx_room():
-    show_room("Sphinx", "A giant Sphinx lashes her tail and studies you.")
-    st.write(
-        f"'Answer my riddles, {st.session_state.name}, and you may pass'"
-    )
-    st.write(" :blue[You wonder how she knows your name]")
-    RIDDLES = [
+# Act 2: Shifting Room
+RIDDLES = [
     {"q": "'I speak without a mouth and hear without ears. What am I?'",
      "options": ["An echo", "A shadow", "A dream"], "answer": "An echo"},
     {"q": "'The more of me you take, the more you leave behind.'",
@@ -200,6 +225,16 @@ def sphinx_room():
     {"q": "'What has keys but opens no locks?'",
      "options": ["A piano", "A map", "A cage"], "answer": "A piano"},
 ]
+
+
+def sphinx_room():
+    if st.session_state.sphinx_cleared:
+        st.write("The Sphinx lowers her head. You have already passed.")
+        return
+
+    show_room("Sphinx", "A giant Sphinx lashes her tail and studies you.")
+    st.write(f"'Answer my riddles, {st.session_state.name}, and you may pass'")
+    st.write(":blue[You wonder how she knows your name]")
 
     if "riddle" not in st.session_state:
         riddle = random.choice(RIDDLES)
@@ -217,14 +252,17 @@ def sphinx_room():
                 gain_essence(5)
                 story = generate_story(
                     "Sphinx", "The player answers correctly and may pass",
-                    f"Answered '{option}'", "The Sphinx purrs and looks impressed. The way is open.",
+                    f"Answered '{option}'",
+                    "The Sphinx purrs and looks impressed. The way is open.",
                 )
                 set_result("success", story)
+                st.session_state.sphinx_cleared = True
             else:
                 lose_essence(10)
                 story = generate_story(
                     "Sphinx", "The player answers wrongly and loses essence",
-                    f"Answered '{option}'", "The Sphinx smiles. That was not it.",
+                    f"Answered '{option}'",
+                    "The Sphinx smiles. That was not it.",
                 )
                 set_result("lose", story, 10)
             del st.session_state.riddle
@@ -274,36 +312,47 @@ def chapel_room():
         st.rerun()
 
 
-
 def mountain_room():
     show_room(
         "The Mountain",
         "It rises, though you never see it move. A narrow path disappears into the clouds.",
     )
     st.write("The wind carries a sound like your own voice calling from above.")
-    climb, search = st.columns(2)
+
+    if st.session_state.mountain_done:
+        st.write("The mountain has nothing more to teach you today. It never hurries.")
+        return
+
+    rest, climb = st.columns(2)
+
+    with rest:
+        if st.button("Take a rest"):
+            gain_essence(5)
+            story = generate_story(
+                "The Mountain",
+                "The player decides to rest and watch nature, which helps them focus clearly",
+                "Resting on the mountain lets them see a new perspective",
+                "You sit, and the mountain shows you that waiting, watching and going slowly "
+                "is often the most useful path.",
+            )
+            st.session_state.mountain_done = True
+            set_result("success", story)
+            st.rerun()
+    
 
     with climb:
-        if st.button("Take a rest"):
-                gain_essence(5)
-            
-                story = generate_story(
-                    "The Mountain",
-                    "The player decides to rest and watch nature, this helps them to focus clearly",
-                    "Resting on the mountain lets them see a new perspective",
-                    "Explain clearly that the mountain shows you that waiting, watching, and taking things slowly can often be the most beneficial path",
-                )
-                set_result("success", story)
-
-        elif st.button("Fight upwards"):
-                lose_essence(10)
-                story = generate_story(
-                        "The Mountain",
-                        "The player keeps climbing and loses essence",
-                        "Climbing the mountain causes exhaustion",
-                        "The path shifts beneath you. Something inside you remains behind.",
-                    )
-                set_result("lose", story, 10)
+        # Fighting upwards still lets you pass, but it costs essence
+        if st.button("Fight upwards"):
+            lose_essence(10)
+            story = generate_story(
+                "The Mountain",
+                "The player keeps climbing and loses essence",
+                "Climbing the mountain causes exhaustion",
+                "The path shifts beneath you. Something inside you remains behind.",
+            )
+            st.session_state.mountain_done = True
+            set_result("lose", story, 10)
+            st.rerun()
 
 
 def shifting_room():
@@ -324,9 +373,121 @@ def shifting_room():
         mountain_room()
 
 
-#Beginning
-st.title("🌌 Unbecoming 🌌")
+# Act 3: Chamber of Chance
+BAND_EFFECT = {
+    "crisis": -12,
+    "rough": -5,
+    "steady": 3,
+    "graceful": 8,
+}
+
+
+def band_for(raw, adjusted):
+    if adjusted <= 5:
+        return "crisis"
+    if adjusted <= 10:
+        return "rough"
+    if adjusted <= 15:
+        return "steady"
+    return "graceful"
+
+
+SCENARIOS = [
+    {"title": "The River",
+     "intro": "A river runs through the chamber, and it is never where you left it.",
+     "hint": "You watch. The water pulls left, then right, then left. A breath, a rhythm.",
+     "clue": "The river does not hurry, yet it arrives.",
+     "crisis": "You rush the water and the water laughs. It carries you farther than you meant to go.",
+     "rough": "You are carried, not carrying. You reach the far bank with less of yourself.",
+     "steady": "You step where the current rests, and the river lets you cross.",
+     "graceful": "You stop resisting and are carried exactly where you needed to go."},
+
+    {"title": "The Stranger",
+     "intro": "A doorway appears that was not there a moment ago. A stranger leans against it, smiling with great patience. 'There is a quicker way,' he says. 'Trust me.'",
+     "hint": "You ask questions and listen to how he answers, not only to what he says.",
+     "clue": "Ask not whether the guide is kind, but where the road leads.",
+     "crisis": "You were careful, and it does not matter. The shortcut was a circle. You arrive where you began, lighter.",
+     "rough": "He was half honest. The path exists, but the toll was never mentioned.",
+     "steady": "He is neither saint nor snake. The shortcut holds, and it costs you only a little.",
+     "graceful": "He tells the truth, and it seems to surprise him as much as you. At the end he nods like an old friend, though you have never met."},
+
+    {"title": "The Lantern",
+     "intro": "A lantern hangs in the dark, and it hums. Not the name you gave, but an older one. Its glow is warm and slow, and you cannot look away. It seems so close. Only a few steps, surely.",
+     "hint": "You watch it, and you notice: it is never farther than a few steps. Only ever a few steps.",
+     "clue": "The point has already moved. Walk anyway.",
+     "crisis": "You run. It rises a little further each time, and you run harder. When you stop, breathless, it is exactly a few steps ahead still, humming, patient. You have never been so tired of something so beautiful.",
+     "rough": "You reach where it was. It is a little ahead. You reach that, and it is a little ahead again. You curse, you laugh, you curse again. Somewhere along the way you drop something of yourself.",
+     "steady": "You reach where it was. It is a little ahead. You sigh, and walk on, less angry than the last time.",
+     "graceful": "You reach where it was. It is a little ahead. You laugh. The walking has become a joy as your laughter echoes in the dark whilst you follow the lantern you can never catch, and the lantern glows warmer... as if it was waiting for you to notice this the entire time."},
+]
+
+
+def chamber_room():
+    st.write(f"You move onto the next level, this is The Chamber of Chance. Careful, {st.session_state.name}, even the most talented initiates can lose it all to Lady Luck")
+    if st.session_state.action_complete:
+        show_result()
+        show_continue_button()
+        return
+
+    step = st.session_state.chamber_step
+    if step >= len(SCENARIOS):
+        st.write("The Chamber falls silent. Nothing here is finished. Nothing ever is.")
+        if st.button("Go on"):
+            st.session_state.stage = "whispering"
+            st.rerun()
+        return
+
+    sc = SCENARIOS[step]
+    show_room(sc["title"], sc["intro"])
+
+    if st.session_state.watched:
+        st.caption(sc["hint"])
+    elif st.button("Watch and wait"):
+        st.session_state.watched = True
+        st.rerun()
+
+    if st.button("Roll the die"):
+        raw = random.randint(1, 20)
+        bonus = 2 if st.session_state.watched else 0
+        band = band_for(raw, min(20, raw + bonus))
+        effect = BAND_EFFECT[band]
+        note = f"🎲 {raw}" + (" (+2 from watching)" if bonus else "")
+        text = f"{note}\n\n{sc[band]}"
+
+        if effect < 0:
+            lose_essence(-effect)
+            set_result("lose", text, -effect)
+        else:
+            gained = gain_essence(effect)
+            if band == "graceful" and sc["clue"] not in st.session_state.clues:
+                st.session_state.clues.append(sc["clue"])
+            set_result("heal", text, gained)
+
+        st.session_state.chamber_step += 1
+        st.session_state.watched = False
+        st.rerun()
+
+
+# Act 4: Whispering Room (to be worked on)
+def whispering_room():
+    show_room(
+        "The Whispering Room",
+        "The Void is closer here. It has been listening all along.",
+    )
+    if st.session_state.clues:
+        st.write("What you carry with you:")
+        for clue in st.session_state.clues:
+            st.write(f"🔎 {clue}")
+    st.caption("To be written.")
+
+
+# Beginning 
+st.title("🌌 Ever Becoming 🌌")
 st.subheader("Dance the spiral, never ending")
+st.write("ESSENCE: Essence is what sustains you. Gather it, stack it, and carry it with you through the thresholds. "
+         "Each loss weakens your ability to persevere. "
+         "Gather what you can. Question what you are told. Protect what you have learned. "
+         "You cannot become without first having something to become from.")
 
 if not st.session_state.game_started:
     awakening()
@@ -338,8 +499,12 @@ else:
     if st.session_state.essence <= 0:
         st.error("You come undone. The spiral keeps turning without you.")
         if st.button("Begin again"):
-            for k, v in defaults.items():
-                st.session_state[k] = v
+            reset_game()
             st.rerun()
-    else:
+    elif st.session_state.stage == "shifting":
         shifting_room()
+    elif st.session_state.stage == "chamber":
+        chamber_room()
+    else:
+        whispering_room()
+
