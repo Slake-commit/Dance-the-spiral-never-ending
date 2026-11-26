@@ -23,6 +23,7 @@ You speak in philosophical riddles and unsettling observations.
 You may question the player's assumptions.
 You must never explain exactly what the Void is.
 Keep responses short and atmospheric.
+Do not insult or demean the player.
 """
 
 SCISSORS_LINE = (
@@ -51,7 +52,7 @@ defaults = {
     "mountain_done": False,
     "hard_riddle_open": False,
     "chapel_found": 0,
-    "clues": [],
+    "clues": ["The chapel Ledger"],
     "watched": False,
     "chamber_step": 0,
     "stage": "shifting",  # shifting -> chamber -> whispering
@@ -304,7 +305,7 @@ def chapel_room():
             st.session_state.cleared.append("chapel")
             st.session_state.clues.append("The Keeper's ledger")
             set_result("success", "His smile slips. The congregation sees it too. "
-                       "The ledger falls from his sleeve.")
+                       "The ledger falls from his sleeve. For some reason you feel the need to keep the ledger, so you pocket it")
         else:
             lose_essence(10)
             set_result("lose", "He talks circles around you. Without proof, "
@@ -470,21 +471,88 @@ def chamber_room():
 
 # Act 4: Whispering Room (to be worked on)
 def whispering_room():
+    LEDGER = "The chapel Ledger"
     show_room(
         "The Whispering Room",
         "The Void is closer here. It has been listening all along.",
     )
-    if st.session_state.clues:
-        st.write("What you carry with you:")
-        for clue in st.session_state.clues:
-            st.write(f"🔎 {clue}")
-    st.caption("To be written.")
+
+    if "ledger_given" not in st.session_state:
+        st.session_state.ledger_given = False
+
+    if st.session_state.ledger_given == False:
+        st.write("The walls don't echo here. They answer.")
+        st.write("*You carried something here. Show me.*")
+
+        if LEDGER in st.session_state.clues:
+            if st.button("Hand over the ledger"):
+                st.session_state.ledger_given = True
+                st.rerun()
+        else:
+            st.write("You carry nothing the Void recognises.")
+
+        if st.button("Leave without offering anything"):
+            lose_essence(5)
+            st.session_state.stage = "final"
+            st.rerun()
+
+    elif st.session_state.ledger_given:
+        st.write("The Void turns the ledger over, slowly. Names. Sums. Signatures.")
+        st.write("*You saw who they really were. Good.*")
+        st.write("*Now hear this: do not trust me blindly either. Not me, not them, not anyone who asks you to stop looking.*")
+
+        if st.button("Go to the Final Threshold"):
+            st.session_state.stage = "final"
+            st.rerun()
+    else: 
+        final_threshold()
+
+def final_threshold():
+    show_room(
+        "The Final Threshold",
+        "The Void counts what is left of you.",
+    )
+
+    if "web_cut" not in st.session_state:
+        st.session_state.web_cut = False
+
+    essence = st.session_state.essence
+    st.write(f"Essence remaining: {essence}")
+
+    if essence > 60:
+        st.write("*You have learned. I am impressed, and I don't say that often.*")
+        st.write("*Keep going. The spiral never ends, and neither does your growth.*")
+    elif essence >= 45:
+        st.write("*You have passed. But little has changed.*")
+        st.write("*You are much as you were when you arrived. That is not a failure. It is a place to begin.*")
+    else:
+        st.write("*You have passed. But only just.*")
+        st.write("*Look more. Think more. The answers were closer than you thought.*")
+
+    st.divider()
+
+    if st.session_state.web_cut == False:
+        st.write("Threads close around you, soft and sticky. A web, pale and endless, holds you where you stand.")
+        st.write("In your hand, the scissors you were gifted.")
+
+        if st.button("Cut through the web"):
+            st.session_state.web_cut = True
+            st.rerun()
+
+    else:
+        st.write("Snip. The threads fall away, and the world tears open like paper.")
+        st.write("You wake where you first chose. The air is quiet and ordinary. It was only a dream, you think.")
+        st.write("Then you feel something cold beside you. The scissors.")
+
+        if st.button("Begin again"):
+            st.session_state.clear()
+            st.rerun()
 
 
 # Beginning 
 st.title("🌌 Ever Becoming 🌌")
 st.subheader("Dance the spiral, never ending")
-st.write("ESSENCE: Essence is what sustains you. Gather it, stack it, and carry it with you through the thresholds. "
+st.write("ESSENCE: Essence is what sustains you. Stack it and carry it with you through the thresholds. "
          "Each loss weakens your ability to persevere. "
          "Gather what you can. Question what you are told. Protect what you have learned. "
          "You cannot become without first having something to become from.")
@@ -505,6 +573,8 @@ else:
         shifting_room()
     elif st.session_state.stage == "chamber":
         chamber_room()
-    else:
+    elif st.session_state.stage == "whispering":
         whispering_room()
+    elif st.session_state.stage == "final":
+        final_threshold()
 
