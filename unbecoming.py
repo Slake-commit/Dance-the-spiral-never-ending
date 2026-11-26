@@ -540,7 +540,7 @@ def final_threshold():
             st.rerun()
 
     else:
-        st.write("Snip. The threads fall away, and the world tears open like paper.")
+        st.write("Snip. The threads fall away. Snip. The world tears open like paper.")
         st.write("You wake where you first chose. The air is quiet and ordinary. It was only a dream, you think.")
         st.write("Then you feel something cold beside you. The scissors.")
 
