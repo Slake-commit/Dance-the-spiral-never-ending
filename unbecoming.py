@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from google import genai
 
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
 api_key = st.secrets["GEMINI_API_KEY"]
 client = genai.Client(api_key=api_key) if api_key else None
 MODEL_NAME = "gemini-3.5-flash-lite"
