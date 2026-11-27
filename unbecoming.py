@@ -555,7 +555,14 @@ st.subheader("Dance the spiral, never ending")
 st.write("ESSENCE: Essence is what sustains you. Stack it and carry it with you through the thresholds. "
          "Each loss weakens your ability to persevere. "
          "Gather what you can. Question what you are told. Protect what you have learned. "
-         "You cannot become without first having something to become from.")
+         "You cannot become without first having something to become from."
+st.sidebar.title("Inventory")
+
+if len(st.session_state.inventory) == 0:
+    st.sidebar.write("Empty for now.")
+else:
+    for item in st.session_state.inventory:
+        st.sidebar.write("- " + item)
 
 if not st.session_state.game_started:
     awakening()
